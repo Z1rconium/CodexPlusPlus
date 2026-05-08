@@ -1,4 +1,5 @@
 from pathlib import Path
+import errno
 
 import pytest
 
@@ -199,3 +200,13 @@ def test_cli_logs_launch_failure_for_hidden_pythonw(monkeypatch, tmp_path):
         cli.main(["launch"])
 
     assert "inject failed" in log_path.read_text(encoding="utf-8")
+
+
+def test_cli_launch_returns_success_when_helper_already_running(monkeypatch):
+    address_in_use = OSError(errno.EADDRINUSE, "Address already in use")
+    monkeypatch.setattr(cli, "launch_and_inject", lambda *args: (_ for _ in ()).throw(address_in_use))
+    monkeypatch.setattr(cli, "helper_is_healthy", lambda port, timeout=0.8: True)
+
+    exit_code = cli.main(["launch"])
+
+    assert exit_code == 0

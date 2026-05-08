@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import plistlib
+import shlex
 import shutil
 import stat
 import sys
@@ -28,6 +29,19 @@ def _app_root(options: "InstallOptions") -> Path:
     return (options.install_root or DEFAULT_INSTALL_ROOT) / APP_NAME
 
 
+def _launcher_script(options: "InstallOptions") -> str:
+    command = shlex.quote(_launcher_command(options))
+    return (
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "STATE_DIR=\"$HOME/.codex-session-delete\"\n"
+        "LOG_FILE=\"$STATE_DIR/launcher.log\"\n"
+        "mkdir -p \"$STATE_DIR\"\n"
+        f"nohup /bin/sh -lc {command} >>\"$LOG_FILE\" 2>&1 &\n"
+        "exit 0\n"
+    )
+
+
 def install_macos_app(options: "InstallOptions") -> None:
     app = _app_root(options)
     contents = app / "Contents"
@@ -51,7 +65,7 @@ def install_macos_app(options: "InstallOptions") -> None:
     (contents / "Info.plist").write_bytes(plistlib.dumps(plist))
 
     executable = macos / EXECUTABLE_NAME
-    executable.write_text(f"#!/bin/sh\nexec {_launcher_command(options)}\n", encoding="utf-8")
+    executable.write_text(_launcher_script(options), encoding="utf-8")
     executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     _copy_codex_icon(resources)

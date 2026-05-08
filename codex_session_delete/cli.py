@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import json
 import traceback
 from pathlib import Path
 
@@ -55,13 +57,27 @@ def log_launch_failure(exc: BaseException) -> None:
     path.write_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8")
 
 
+def helper_is_healthy(port: int, timeout: float = 0.8) -> bool:
+    from urllib.error import URLError
+    from urllib.request import urlopen
+
+    try:
+        with urlopen(f"http://127.0.0.1:{port}/health", timeout=timeout) as response:
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+    except (URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        return False
+    return bool(payload.get("ok"))
+
+
 def wait_for_shutdown(server: HelperServer, codex_proc) -> None:
     try:
         if codex_proc is None:
             import subprocess as _sp
             import time as _time
             while True:
-                result = _sp.run(["pgrep", "-f", "^/Applications/Codex\\.app/Contents/MacOS/Codex"], capture_output=True)
+                result = _sp.run(["pgrep", "-x", "Codex"], capture_output=True)
                 if result.returncode != 0:
                     break
                 _time.sleep(2)
@@ -76,6 +92,12 @@ def wait_for_shutdown(server: HelperServer, codex_proc) -> None:
 def run_launch(args: argparse.Namespace) -> int:
     try:
         server, codex_proc = launch_and_inject(args.app_dir, args.db, args.backup_dir, args.debug_port, args.helper_port)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE and helper_is_healthy(args.helper_port):
+            print(f"Codex++ helper already running on http://127.0.0.1:{args.helper_port}")
+            return 0
+        log_launch_failure(exc)
+        raise
     except Exception as exc:
         log_launch_failure(exc)
         raise
